@@ -25,6 +25,9 @@ let mapGroup, holoGroup, entityGroup, overlayGroup, bridgeGroup, starGroup;
 let mapTexture, mapMaterial;
 let raycaster, pointerVec, mapPlane;
 let stateRef = null;
+// Die Nachbearbeitung hängt zwischen Szene und Schirm. Kommt sie nicht
+// zustande, wird wie früher direkt gezeichnet.
+let postFX = null;
 let mapMode = 'normal';
 let guidesVisible = true;
 let bridgeVisible = true;
@@ -72,9 +75,26 @@ export function initScene(canvas) {
   canvasEl = canvas;
   renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false, preserveDrawingBuffer: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  // Farbverwaltung: linear rechnen, in sRGB ausgeben, ACES für alles, was
+  // heller als weiß ist. Muss vor der ersten Farbe stehen.
+  if (window.__setupColorPipeline) window.__setupColorPipeline(renderer, 1.0, 'film');
+  // Die Tonwerte macht ab jetzt der letzte Durchgang der Nachbearbeitung.
+  if (window.__makePostFX) {
+    postFX = window.__makePostFX(renderer, {
+      kurve: 'aces',
+      belichtung: 1.0,
+      // Erst was heller als Weiß ist, blendet: die Sternkarte ist voll
+      // heller Flächen, und bei 0,85 leuchtete sie als Ganzes.
+      bloom: { schwelle: 1.3, staerke: 0.45, radius: 2.2 },
+    });
+    if (postFX) renderer.toneMapping = THREE.NoToneMapping;
+  }
   renderer.setClearColor(0x04060c, 1);
   scene = new THREE.Scene();
   scene.fog = new THREE.Fog(0x04060c, 900, 2600);
+  // Metallische Rümpfe brauchen etwas zum Spiegeln, sonst bleiben sie
+  // schwarz - die Umgebungskarte ist gemalt, nicht geladen.
+  if (window.__buildEnvMap) scene.environment = window.__buildEnvMap(renderer, 'raum');
   camera = new THREE.PerspectiveCamera(46, 1, 1, 3000);
 
   mapGroup = new THREE.Group();
@@ -87,9 +107,9 @@ export function initScene(canvas) {
 
   // Licht: kaltes Deckenlicht von oben, ein warmer Schein aus dem Hologramm
   // selbst - die Karte leuchtet, nicht der Raum.
-  scene.add(new THREE.AmbientLight(0x4a6688, 1.15));
+  scene.add(new THREE.AmbientLight(0x4a68c8, 1.15));
   scene.add(new THREE.HemisphereLight(0x9dc4ff, 0x0a1018, 0.5));
-  const key = new THREE.DirectionalLight(0xbcd6ff, 0.7);
+  const key = new THREE.DirectionalLight(0xbcdcff, 0.7);
   key.position.set(120, 260, 160);
   scene.add(key);
   // Zwei Deckenlampen über dem Tisch: sie geben der Brücke Tiefe, wenn die
@@ -2041,7 +2061,8 @@ export function render() {
   animateBases(now / 1000);
   animateShields(now / 1000);
   layoutLabels();
-  renderer.render(scene, camera);
+  if (postFX) postFX.render(scene, camera);
+  else renderer.render(scene, camera);
 }
 
 export function captureFrame() {

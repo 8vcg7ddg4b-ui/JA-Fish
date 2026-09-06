@@ -423,7 +423,22 @@ muss quer über die Karte ziehen. `Ü` klappt sie weg.
 ## Aufbau des Codes
 
 Reine ES-Module, keine Bauwerkzeuge, keine Abhängigkeiten außer Three.js
-(mitgeliefert unter `js/vendor/`). Die **Geräusche werden gerechnet, nicht
+(r149, vom CDN; die mitgelieferte Fassung unter `js/vendor/` springt ein, wenn
+das CDN nicht durchkommt).
+
+Vor dem Spielcode laufen drei einfache Skripte unter `js/render/`, die beide
+Spiele sich teilen. Sie sind bewusst keine Module: sie müssen stehen, ehe die
+erste Farbe angelegt wird.
+
+| Datei | Was sie tut |
+| --- | --- |
+| `envmap.js` | Malt eine kleine Himmelskugel in eine Leinwand und macht daraus eine Umgebungskarte. Ohne sie bleiben metallische Rümpfe fast schwarz – sie hätten nichts zum Spiegeln. |
+| `colorpipeline.js` | Farbverwaltung an, Ausgabe in sRGB, ACES-Tonwerte. Dazu bekommt jede gemalte Leinwand den Vermerk sRGB – sonst kämen Beschriftungen und Flugdeck zu hell heraus. |
+| `postfx.js` | Eigene Nachbearbeitung ohne fremde Bausteine: heller Auszug über einer Schwelle, zwei getrennte Unschärfen in halber Größe, Zusammensetzen mit Tonwerten. Die Tonwertabbildung wandert dabei aus dem Renderer in den letzten Durchgang – nur so wird das Leuchten addiert, **bevor** die Helligkeit zusammengedrückt wird. |
+
+Im Gefecht wandert außerdem ein einzelnes Licht mit, das bei jedem Schuss und
+jeder Explosion kurz aufflammt: Mündungsfeuer beleuchtet damit die Rümpfe
+ringsum, statt nur selbst zu strahlen. Die **Geräusche werden gerechnet, nicht
 geladen**: Funk, Triebwerke, Laser und Einschläge entstehen im Browser aus
 Oszillatoren. Die **Musik ist eine Aufnahme**: „Black Hull Directive"
 (`audio/black-hull-directive.mp3`) läuft im Startbild und tritt im Feldzug

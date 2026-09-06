@@ -523,7 +523,55 @@
        als Datenadresse, damit die eine Datei auch klingt. -->
   <audio id="themeAudio" src="audio/black-hull-directive.mp3" loop preload="auto"></audio>
 
-  <script src="js/vendor/three.min.js"></script>
+  <!-- three.js kommt vom CDN statt aus dem Dokument ------------------------
+       Die Fassung ist dieselbe wie zuvor (r149), nur liegt sie jetzt nicht mehr
+       als 0,6 MB im Dokument, sondern wird vom Browser geholt und
+       zwischengespeichert - beim zweiten Aufruf und für das Schwesterspiel
+       kostet sie gar nichts mehr. Das Skript blockiert das Parsen, THREE steht
+       also fest, bevor der Spielcode läuft. Kommt es nicht an, sagt der Kasten
+       oben warum, statt dass eine schwarze Seite stehenbleibt. -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.149.0/three.min.js"></script>
+  <script>
+    // Kommt das CDN nicht durch - Netzfilter, kein Netz, ein Prüflauf in
+    // abgeschotteter Umgebung -, wird die mitgelieferte Fassung nachgeladen.
+    // `document.write` ist hier genau richtig: es hält den Parser an, THREE
+    // steht also fest, bevor der Spielcode läuft.
+    if (typeof THREE === 'undefined') {
+      document.write('<scr' + 'ipt src="js/vendor/three.min.js"><\/scr' + 'ipt>');
+    }
+  </script>
+  <script>
+    (function () {
+      if (typeof THREE !== 'undefined') return;
+      var box = document.getElementById('bootError');
+      var text = document.getElementById('bootErrorText');
+      if (!box || !text) return;
+      text.textContent = 'Die 3D-Bibliothek (three.js) konnte nicht geladen werden. '
+        + 'Ein Werbe- oder Netzfilter blockiert vermutlich cdnjs.cloudflare.com. '
+        + 'Seite neu laden oder den Filter für diese Seite abschalten.';
+      box.classList.remove('hidden');
+      setTimeout(function () {
+        if (typeof THREE !== 'undefined') return;
+        var b2 = document.getElementById('bootError');
+        var t2 = document.getElementById('bootErrorText');
+        if (!b2 || !t2) return;
+        t2.textContent = 'Die 3D-Bibliothek (three.js) konnte nicht geladen werden. '
+          + 'Ein Werbe- oder Netzfilter blockiert vermutlich cdnjs.cloudflare.com. '
+          + 'Seite neu laden oder den Filter für diese Seite abschalten.';
+        b2.classList.remove('hidden');
+      }, 3000);
+    })();
+  </script>
+
+  <!-- Was zwischen Szene und Schirm liegt: Umgebungslicht für metallische
+       Rümpfe, Farbverwaltung mit sRGB und Tonwerten, und die eigene
+       Nachbearbeitung. Alles drei sind einfache Skripte und keine Module -
+       sie müssen laufen, ehe die erste Farbe angelegt wird, und beide Spiele
+       teilen sie sich. -->
+  <script src="js/render/envmap.js"></script>
+  <script src="js/render/colorpipeline.js"></script>
+  <script src="js/render/postfx.js"></script>
+
   <script type="module" src="js/main.js"></script>
 </body>
 </html>

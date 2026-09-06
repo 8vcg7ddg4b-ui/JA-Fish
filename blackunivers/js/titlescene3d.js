@@ -10,6 +10,8 @@ import { shipModel, torpedoModel, SHIP_LENGTH } from './ships3d.js';
 import { factionProfile, RIVAL_OF } from './data.js';
 
 let renderer, scene, camera, canvas;
+// Die Nachbearbeitung des Startbilds - ohne sie wird direkt gezeichnet.
+let postFX = null;
 let running = false;
 let frame = null;
 let hero = null;
@@ -159,9 +161,21 @@ export function initTitleScene(container, factionId = 'confed') {
     return false;
   }
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  if (window.__setupColorPipeline) window.__setupColorPipeline(renderer, 1.0, 'film');
+  if (window.__makePostFX) {
+    // Im Startbild darf es kräftiger blenden als auf der Karte: hier stehen
+    // Triebwerke und Leuchtspuren vor schwarzem Raum.
+    postFX = window.__makePostFX(renderer, {
+      kurve: 'aces',
+      belichtung: 1.0,
+      bloom: { schwelle: 1.0, staerke: 0.7, radius: 2.4 },
+    });
+    if (postFX) renderer.toneMapping = THREE.NoToneMapping;
+  }
   renderer.setClearColor(0x04070e, 1);
 
   scene = new THREE.Scene();
+  if (window.__buildEnvMap) scene.environment = window.__buildEnvMap(renderer, 'raum');
   camera = new THREE.PerspectiveCamera(38, 16 / 9, 0.5, 900);
   camera.position.set(0, 2.4, 33);
   camera.lookAt(6.5, 0.2, 0);
@@ -496,7 +510,8 @@ function loop() {
   camera.position.y = 3.4 - pointer.y * 1.4;
   camera.lookAt(4, 0.5, 0);
 
-  renderer.render(scene, camera);
+  if (postFX) postFX.render(scene, camera);
+  else renderer.render(scene, camera);
   frame = requestAnimationFrame(loop);
 }
 

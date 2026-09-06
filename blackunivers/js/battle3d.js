@@ -15,6 +15,8 @@ import { sfx } from './audio.js';
 let running = false;
 let cancelled = false;
 let group = null;
+// Das eine Licht, das im Gefecht mitwandert und bei jedem Schuss aufflammt.
+let battleLight = null;
 
 function ensureGroup() {
   const { scene } = sceneHandles();
@@ -62,6 +64,7 @@ function kill(node) {
 function clearGroup() {
   effects.length = 0;
   torpedoes.length = 0;
+  if (battleLight) { battleLight.intensity = 0; battleLight = null; }
   if (!group) return;
   while (group.children.length) {
     const child = group.children.pop();
@@ -141,9 +144,39 @@ function glowMaterial(colour, opacity = 1) {
   });
 }
 
+// --- Das Licht des Gefechts ---------------------------------------------
+// Mündungsfeuer und Explosionen waren bisher nur leuchtende Flächen: sie
+// strahlten, aber sie beleuchteten nichts. Ein einziges Licht, das im
+// Gefecht mitwandert und bei jedem Schuss kurz aufflammt, legt den Schein
+// auf die Rümpfe ringsum.
+function gefechtslicht(g) {
+  if (!battleLight) {
+    battleLight = new THREE.PointLight(0xffffff, 0, 60, 2);
+    battleLight.name = 'gefechtslicht';
+  }
+  if (battleLight.parent !== g) g.add(battleLight);
+  return battleLight;
+}
+
+function blitzlicht(g, pos, colour, staerke, dauer) {
+  const light = gefechtslicht(g);
+  light.position.copy(pos);
+  light.color.set(colour);
+  // Zwei Schüsse kurz nacheinander sollen einander nicht abdunkeln.
+  if (staerke > light.intensity) light.intensity = staerke;
+  let t = 0;
+  addEffect((dt, e) => {
+    t += dt;
+    const rest = staerke * (1 - t / dauer);
+    if (rest < light.intensity) light.intensity = Math.max(0, rest);
+    if (t >= dauer) { light.intensity = 0; e.done = true; }
+  });
+}
+
 // Der Mündungsblitz: ein kurzer Funke am Geschütz, damit man sieht, wer
 // gerade feuert.
 function muzzleFlash(g, pos, colour) {
+  blitzlicht(g, pos, colour, 2.1, 0.14);
   const geo = sharedGeo('flash', () => new THREE.SphereGeometry(0.5, 8, 6));
   const mesh = new THREE.Mesh(geo, glowMaterial(colour, 0.9));
   mesh.position.copy(pos);
@@ -205,6 +238,7 @@ function explode(g, pos, { size = 2.4, colour = 0xffc27a, shards = 7, life = 0.8
   );
   wave.position.copy(pos);
   g.add(core, shell, wave);
+  blitzlicht(g, pos, 0xffdfa4, 3.4 + size * 0.5, life * 0.6);
   const view = sceneHandles().camera;
   let t = 0;
   addEffect((dt, e) => {

@@ -23,6 +23,108 @@
 // Jäger im Gefecht sollen nicht dreihundert Puffer belegen.
 const modelCache = new Map();
 
+// Die Plattenhaut: hell genug, dass sie die Rumpffarbe nur moduliert statt
+// sie abzudunkeln (sie wird als `map` mit der Farbe multipliziert). Alles
+// darauf ist fein und unregelmäßig - grobe, gerade Muster würden auf einem
+// gestreckten Kasten sofort als verzerrtes Gitter auffallen.
+let panelTexture = null;
+function hullPanels() {
+  if (panelTexture) return panelTexture;
+  const S = 256;
+  const cv = document.createElement('canvas');
+  cv.width = S;
+  cv.height = S;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#f7f7f7';
+  g.fillRect(0, 0, S, S);
+  // Ein fester Zufall: dieselbe Haut bei jedem Start.
+  let seed = 20250906;
+  const zufall = () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed / 0x7fffffff;
+  };
+  // Bleche: unterschiedlich helle Rechtecke, damit die Fläche nicht wie
+  // lackiert wirkt.
+  for (let i = 0; i < 34; i++) {
+    const w = 24 + zufall() * 70;
+    const h = 18 + zufall() * 54;
+    const x = zufall() * S;
+    const y = zufall() * S;
+    const t = 0.86 + zufall() * 0.14;
+    g.fillStyle = `rgba(${Math.round(255 * t)},${Math.round(255 * t)},${Math.round(255 * t)},0.5)`;
+    g.fillRect(x, y, w, h);
+  }
+  // Fugen: dünne dunkle Linien, waagerecht und senkrecht, in ungleichen
+  // Abständen.
+  g.strokeStyle = 'rgba(60,68,80,0.34)';
+  g.lineWidth = 1;
+  for (let i = 0; i < 22; i++) {
+    const x = Math.round(zufall() * S) + 0.5;
+    g.beginPath();
+    g.moveTo(x, 0);
+    g.lineTo(x, S);
+    g.stroke();
+  }
+  for (let i = 0; i < 16; i++) {
+    const y = Math.round(zufall() * S) + 0.5;
+    g.beginPath();
+    g.moveTo(0, y);
+    g.lineTo(S, y);
+    g.stroke();
+  }
+  // Nietreihen entlang einiger Fugen.
+  g.fillStyle = 'rgba(50,58,70,0.30)';
+  for (let i = 0; i < 8; i++) {
+    const y = Math.round(zufall() * S);
+    for (let x = 3; x < S; x += 7) g.fillRect(x, y, 1, 1);
+  }
+  panelTexture = new THREE.CanvasTexture(cv);
+  panelTexture.wrapS = THREE.RepeatWrapping;
+  panelTexture.wrapT = THREE.RepeatWrapping;
+  panelTexture.repeat.set(3, 3);
+  panelTexture.anisotropy = 4;
+  return panelTexture;
+}
+
+// Ein weicher Fleck als Bild: eine Sprite ohne Textur wäre ein hartes
+// Quadrat. Diese hier wird einmal gemalt und von allen Triebwerken geteilt.
+let dotTexture = null;
+function softDot() {
+  if (dotTexture) return dotTexture;
+  const cv = document.createElement('canvas');
+  cv.width = 64;
+  cv.height = 64;
+  const g = cv.getContext('2d');
+  const rg = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  rg.addColorStop(0, 'rgba(255,255,255,1)');
+  rg.addColorStop(0.35, 'rgba(255,255,255,0.55)');
+  rg.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = rg;
+  g.fillRect(0, 0, 64, 64);
+  dotTexture = new THREE.CanvasTexture(cv);
+  return dotTexture;
+}
+
+// Der Schein, den ein laufendes Triebwerk um sich hat. Ohne ihn ist die
+// Düse nur eine helle Scheibe, die aus jedem Winkel gleich klein aussieht -
+// mit ihm sieht man auf einen Blick, welches Schiff Schub gibt, auch wenn es
+// im Gefecht weit weg steht. Eine Sprite steht immer zur Kamera, kostet
+// einen Zeichenaufruf und keine Beleuchtung.
+function engineHalo(colour, radius, x, y, z, staerke = 0.62) {
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: softDot(),
+    color: colour,
+    transparent: true,
+    opacity: staerke,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  }));
+  sprite.scale.setScalar(radius * 4.4);
+  sprite.position.set(x, y, z);
+  sprite.name = 'flamme';
+  return sprite;
+}
+
 function hullMaterial(colour, accent, { metal = 0.5, rough = 0.5, glow = 0.1 } = {}) {
   // Der Rumpf trägt die Farbe der Flagge, aber gedämpft: ein Schiff ist
   // graues Metall mit einem Farbton darin. Hell wird nur, was leuchtet -
@@ -31,6 +133,7 @@ function hullMaterial(colour, accent, { metal = 0.5, rough = 0.5, glow = 0.1 } =
   const hue = new THREE.Color(colour).lerp(new THREE.Color(0x161d28), 0.68);
   return new THREE.MeshStandardMaterial({
     color: hue,
+    map: hullPanels(),
     emissive: new THREE.Color(accent).multiplyScalar(0.22),
     emissiveIntensity: glow,
     metalness: metal,
@@ -86,6 +189,7 @@ function engine(mat, glowColour, radius, length, x, y, z, flame = 1) {
   disc.rotation.y = Math.PI;
   g.add(disc);
   if (flame > 0) {
+    g.add(engineHalo(glowColour, radius, 0, 0, -length / 2 - radius * 0.5));
     const trail = new THREE.Mesh(
       new THREE.ConeGeometry(radius * 0.72, length * 1.9 * flame, 8, 1, true),
       glowMaterial(glowColour, 0.32),
@@ -132,7 +236,7 @@ function runningLights(group, halfWidth, z) {
 function plateMaterial(colour) {
   const hue = new THREE.Color(colour).lerp(new THREE.Color(0x1c2532), 0.62);
   return new THREE.MeshStandardMaterial({
-    color: hue, metalness: 0.58, roughness: 0.44, flatShading: true,
+    color: hue, map: hullPanels(), metalness: 0.58, roughness: 0.44, flatShading: true,
   });
 }
 

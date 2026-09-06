@@ -1,8 +1,10 @@
 // --- Das Artefakt bauen ---------------------------------------------------
-// Das Spiel besteht aus zwanzig Moduldateien, einer Formatvorlage und
-// Three.js. Ein Artefakt ist eine einzige Seite. Also wird alles
-// zusammengelegt: die Module zu einem Bündel, die Vorlage in ein <style>,
-// Three.js in ein <script> davor - und der Rumpf des Startbilds dazwischen.
+// Das Spiel besteht aus zwanzig Moduldateien, einer Formatvorlage und drei
+// Hilfsskripten für die Anzeige. Ein Artefakt ist eine einzige Seite. Also
+// wird alles zusammengelegt: die Module zu einem Bündel, die Vorlage in ein
+// <style>, die Hilfsskripte in ein <script> davor - und der Rumpf des
+// Startbilds dazwischen. Three.js bleibt draußen: es kommt vom CDN und wird
+// vom Browser zwischengespeichert.
 //
 //   node build-artifact.mjs            -> dist/black-univers.html
 import * as esbuild from 'esbuild';
@@ -34,13 +36,19 @@ const music = fs.existsSync(musicPath)
 // Der Vorspann braucht keine Datei mehr: der Studio-Vorspann ist gezeichnet
 // und steckt als SVG samt Bewegung im Dokument.
 const css = fs.readFileSync(path.join(here, 'css', 'style.css'), 'utf8');
-const three = fs.readFileSync(path.join(here, 'js', 'vendor', 'three.min.js'), 'utf8');
+// Umgebungslicht, Farbverwaltung und Nachbearbeitung: einfache Skripte, die
+// vor dem Spielcode laufen müssen. Im Artefakt stehen sie eingebettet.
+const HELPERS = ['envmap', 'colorpipeline', 'postfx'];
+const helpers = HELPERS
+  .map((name) => fs.readFileSync(path.join(here, 'js', 'render', `${name}.js`), 'utf8'))
+  .join('\n\n');
 
-// Aus dem Dokument wird der Rumpf; die beiden <script src>-Zeilen am Ende
-// fallen weg, weil beides gleich eingebettet folgt.
+// Aus dem Dokument wird der Rumpf. Die Verweise auf eigene Dateien fallen
+// weg, weil alles gleich eingebettet folgt - die Zeile für Three.js vom CDN
+// bleibt stehen.
 const body = html
   .slice(html.indexOf('<body>') + '<body>'.length, html.lastIndexOf('</body>'))
-  .replace(/\n\s*<script src="[^"]*"><\/script>/g, '')
+  .replace(/\n\s*<script src="js\/[^"]*"><\/script>/g, '')
   .replace(/\n\s*<script type="module"[^>]*><\/script>/g, '')
   .replace(/\n\s*<link[^>]*>/g, '')
   .replace('src="audio/black-hull-directive.mp3"', music ? `src="${music}"` : '')
@@ -56,7 +64,7 @@ ${css}
 ${body}
 
 <script>
-${three}
+${helpers}
 </script>
 <script>
 ${bundle}
@@ -66,4 +74,5 @@ ${bundle}
 const file = path.join(out, 'black-univers.html');
 fs.writeFileSync(file, page, 'utf8');
 const kb = (Buffer.byteLength(page) / 1024).toFixed(0);
-console.log(`${file} geschrieben (${kb} KB${music ? ', mit Musik' : ''}, mit Studio-Vorspann)`);
+console.log(`${file} geschrieben (${kb} KB${music ? ', mit Musik' : ''}, `
+  + `mit Studio-Vorspann, Three.js vom CDN)`);
