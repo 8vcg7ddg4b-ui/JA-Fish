@@ -244,10 +244,17 @@ function hideHerald() {
     // zeigte sonst unter Umständen einen Stand von vor dem Kamerawechsel.
     refresh();
     if (tentFade) {
-      requestAnimationFrame(() => {
+      const aufhellen = () => {
         tentFade.classList.remove('tent-fade-instant');
         tentFade.classList.remove('tent-fade-in');
-      });
+      };
+      // Das Aufhellen wartet auf das nächste Bild, damit der Wechsel wirklich
+      // hinter der Blende liegt. Ein Fenster im Hintergrund zeichnet aber
+      // keine Bilder: dort käme der Ruf nie, und wer zurückwechselte, säße vor
+      // einem schwarzen Schirm. Die Uhr daneben ist die Sicherung - sie greift
+      // später als das nächste Bild und ist zweimal auszuführen unschädlich.
+      requestAnimationFrame(aufhellen);
+      setTimeout(aufhellen, 250);
     }
   }
 }
@@ -275,8 +282,17 @@ function showHerald() {
 
 function setupHerald() {
   if (!heraldOverlay) return;
+  // Wegklicken geht überall auf der Ansprache, nicht nur auf dem Knopf. Der
+  // Knopf liegt aber selbst auf der Ansprache: ohne das Anhalten hier liefe
+  // ein Druck auf ihn zweimal durch - einmal als Knopf, einmal als Klick auf
+  // die Fläche darunter.
   const close = document.getElementById('heraldClose');
-  if (close) close.addEventListener('click', hideHerald);
+  if (close) {
+    close.addEventListener('click', (ereignis) => {
+      ereignis.stopPropagation();
+      hideHerald();
+    });
+  }
   heraldOverlay.addEventListener('click', hideHerald);
 }
 setupHerald();

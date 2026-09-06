@@ -1,6 +1,6 @@
 {
   "name": "pax-aeterna",
-  "version": "1.66.0",
+  "version": "1.66.1",
   "description": "Rundenbasiertes 3D-Strategiespiel im Stil von Total War: Rome. Züge und Kämpfe finden direkt auf der Kampagnenkarte statt. Läuft im Browser und als Desktop-Anwendung.",
   "type": "module",
   "main": "desktop/main.js",

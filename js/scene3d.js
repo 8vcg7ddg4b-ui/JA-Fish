@@ -82,6 +82,27 @@ export function setMarchSpeed(factor) {
   marchSpeedFactor = Math.max(0, factor);
 }
 
+// --- Geteiltes Baumaterial -------------------------------------------------
+// Manche Materialien und Texturen gehören nicht einem Bauwerk, sondern dem
+// Modul: das dunkle Tischholz trägt Tisch, Zeltstangen und Zelttor zugleich,
+// die Wappen hängen an Stadtfahne, Heeresfahne und Zeltbahn, und beide werden
+// einmal angelegt und von jedem Feldzug weiterbenutzt.
+//
+// Wer eine Gruppe abräumt, muss sie deshalb stehen lassen. `dispose()` auf ein
+// geteiltes Material zieht es allen anderen Meshes unter den Füßen weg: was
+// three.js danach zeichnet, muss es sich neu übersetzen - ausgerechnet in dem
+// Augenblick, in dem der Umbau hinter der Schwarzblende ruckelfrei sein soll.
+// Diese Marke sagt: das hier gehört dir nicht, lass die Finger davon.
+function geteilt(betriebsmittel) {
+  betriebsmittel.userData.geteilt = true;
+  return betriebsmittel;
+}
+
+function geteilteSammlung(sammlung) {
+  for (const stueck of Object.values(sammlung)) geteilt(stueck);
+  return sammlung;
+}
+
 const cityGroups = new Map(); // cityId -> { group, roof, flag, label }
 const armyGroups = new Map(); // armyId -> THREE.Group
 const highlightMeshes = [];
@@ -184,6 +205,21 @@ export function initScene(canvas) {
   cityGroups.clear();
   armyGroups.clear();
   armyAnimations.clear();
+  // Die verworfene Szene muss auch abgeräumt werden, nicht nur losgelassen:
+  // Gelände, Requisiten, Straßen, Tisch, Orte und Heere liegen als Puffer auf
+  // der Grafikkarte, und die gibt sie erst auf Geheiß wieder her. Eine zweite
+  // Partie in derselben Sitzung legte sonst den ganzen Bestand der ersten
+  // stillschweigend beiseite und baute daneben einen neuen auf.
+  disposeGroup(scene);
+  if (noiseTexture) noiseTexture.dispose();
+  noiseTexture = null;
+  terrainMesh = waterMesh = deepSeaMesh = paperMesh = null;
+  tableGroup = tentGroup = propsGroup = roadsGroup = null;
+  highlightMeshes.length = 0;
+  // Der alte Renderer hält seine übersetzten Programme fest. Die Zeichenfläche
+  // ist dieselbe und behält ihren Grafikkontext - abgeräumt wird deshalb vor
+  // dem neuen Renderer, damit der sich seine Programme frisch anlegt.
+  if (renderer) renderer.dispose();
   renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   // Für das Wetter: Regen und Schnee werden an der Tischkante beschnitten,
@@ -1267,13 +1303,7 @@ const SCHWARM_GROESSE = 5;
 
 function buildWildlife(state) {
   // Eine zweite Karte im selben Fenster erbt sonst die Tiere der ersten.
-  if (wildlifeGroup) {
-    scene.remove(wildlifeGroup);
-    wildlifeGroup.traverse((obj) => {
-      if (obj.geometry) obj.geometry.dispose();
-      if (obj.material) obj.material.dispose();
-    });
-  }
+  disposeGroup(wildlifeGroup);
   wildlife.length = 0;
   wildlifeGroup = new THREE.Group();
   wildlifeGroup.name = 'Tiere';
@@ -1751,6 +1781,10 @@ export function buildMap(state) {
     trunks: leereBaumarten(), leaves: leereBaumarten(),
     rockPeaks: [], snowPeaks: [], oreRock: [], oreVein: [],
   };
+  // Requisiten und Straßen der vorigen Karte gehen mit, ehe die neuen kommen -
+  // sonst blieben sie in der Szene hängen, ohne dass noch jemand sie kennt.
+  disposeGroup(propsGroup);
+  disposeGroup(roadsGroup);
   propsGroup = new THREE.Group();
   propsGroup.name = 'Requisiten';
   roadsGroup = new THREE.Group();
@@ -1923,14 +1957,15 @@ export function buildMap(state) {
 // die auf einem Tisch im eigenen Zelt liegt: Holzrahmen ringsum, Zeltbahnen
 // darüber, in den Farben der eigenen Fraktion.
 
-const TABLE_WOOD = new THREE.MeshStandardMaterial({ color: '#5a3d24', roughness: 0.85 });
-const TABLE_WOOD_DARK = new THREE.MeshStandardMaterial({ color: '#3f2a17', roughness: 0.9 });
+const TABLE_WOOD = geteilt(new THREE.MeshStandardMaterial({ color: '#5a3d24', roughness: 0.85 }));
+const TABLE_WOOD_DARK = geteilt(new THREE.MeshStandardMaterial({ color: '#3f2a17', roughness: 0.9 }));
 // Wie weit die Beine unter die Platte reichen. Der Zeltboden liegt tiefer,
 // als man von der Karte aus sieht - sie dürfen ruhig lang sein.
 const TABLE_LEG_HEIGHT = 42;
 
 function buildTable(boardW, boardH) {
-  if (tableGroup) scene.remove(tableGroup);
+  // Wie beim Zelt: der alte Tisch wird abgeräumt, nicht nur beiseitegestellt.
+  disposeGroup(tableGroup);
   tableGroup = new THREE.Group();
   tableGroup.name = 'Tisch';
   const rim = TILE_SIZE * 1.15;
@@ -2039,7 +2074,9 @@ export function emblemTexture(factionId, colour) {
   ctx.fillStyle = 'rgba(0, 0, 0, 0.22)';
   ctx.fillRect(0, 0, canvas.width, 10);
   ctx.fillRect(0, canvas.height - 16, canvas.width, 16);
-  const texture = new THREE.CanvasTexture(canvas);
+  // Ein Wappen wird einmal gezeichnet und hängt danach an Stadtfahnen,
+  // Heeresfahnen und Zeltbahnen zugleich - es gehört keinem davon allein.
+  const texture = geteilt(new THREE.CanvasTexture(canvas));
   emblemTextures.set(key, texture);
 
   // Das Wappen kommt aus einem SVG und ist deshalb erst nach dem Laden da.
@@ -2064,7 +2101,7 @@ export function emblemTexture(factionId, colour) {
 // Gebaut wird in Throneinheiten (Sitzhöhe 1) und am Ende auf Zeltmaß
 // hochskaliert; so bleiben die Maße hier lesbar.
 
-const TENT_MATERIALS = {
+const TENT_MATERIALS = geteilteSammlung({
   wood: new THREE.MeshStandardMaterial({ color: '#6b4a28', roughness: 0.9 }),
   darkWood: new THREE.MeshStandardMaterial({ color: '#432c17', roughness: 1 }),
   stone: new THREE.MeshStandardMaterial({ color: '#ded6c2', roughness: 0.7 }),
@@ -2075,7 +2112,7 @@ const TENT_MATERIALS = {
   ivory: new THREE.MeshStandardMaterial({ color: '#e9e2cc', roughness: 0.6 }),
   leaf: new THREE.MeshStandardMaterial({ color: '#3f7a3a', roughness: 0.9 }),
   ember: new THREE.MeshBasicMaterial({ color: '#ff9a3c' }),
-};
+});
 
 function tentBox(group, material, w, h, d, x, y, z, rotation = 0) {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
@@ -2365,13 +2402,13 @@ const ARMOUR_STYLE = {
   sarmaten: 'schuppe', parther: 'schuppe',
 };
 
-const ARMOUR_METAL = {
+const ARMOUR_METAL = geteilteSammlung({
   schiene: new THREE.MeshStandardMaterial({ color: '#b9bcc0', roughness: 0.45, metalness: 0.55 }),
   bronze: new THREE.MeshStandardMaterial({ color: '#c08b3e', roughness: 0.4, metalness: 0.55 }),
   leinen: new THREE.MeshStandardMaterial({ color: '#ded0a8', roughness: 0.95 }),
   kette: new THREE.MeshStandardMaterial({ color: '#8b8f94', roughness: 0.6, metalness: 0.4 }),
   schuppe: new THREE.MeshStandardMaterial({ color: '#7d6a4a', roughness: 0.55, metalness: 0.3 }),
-};
+});
 
 function buildArmourStand(factionId, colour) {
   const art = ARMOUR_STYLE[factionId] || 'kette';
@@ -2935,10 +2972,27 @@ function disposeGroup(group) {
   if (!group) return;
   if (group.parent) group.parent.remove(group);
   group.traverse((obj) => {
-    if (obj.geometry) obj.geometry.dispose();
-    if (obj.material) {
-      if (Array.isArray(obj.material)) obj.material.forEach((m) => m.dispose());
-      else obj.material.dispose();
+    // Geometrien gehören meist dem einen Mesh, für das sie gebaut wurden - drei
+    // Ausnahmen gibt es: die Gestalten der Marschierer und alles sonst
+    // Markierte gehören dem Modul, und jedes Schild (`Sprite`) teilt sich sein
+    // Viereck mit allen anderen Schildern - das gehört three.js selbst, und
+    // wer es abräumt, nimmt es auch jedem Namensschild auf der Karte weg.
+    const eigeneGeometrie = obj.geometry && !obj.isSprite
+      && !obj.userData.sharedGeom && !obj.geometry.userData.geteilt;
+    if (eigeneGeometrie) obj.geometry.dispose();
+    const materialien = Array.isArray(obj.material) ? obj.material
+      : obj.material ? [obj.material] : [];
+    for (const material of materialien) {
+      // Was dem Modul gehört, bleibt stehen (siehe `geteilt`): das dunkle
+      // Tischholz trägt auch den Tisch, die Wappen hängen auch an den Fahnen.
+      if (material.userData.geteilt) continue;
+      // Die Zeltbahn ihrerseits gehört dem Material, das sie trägt - sie wird
+      // für jedes Zelt neu gemalt und ginge sonst als einziges nicht mit.
+      for (const feld of ['map', 'alphaMap', 'emissiveMap', 'normalMap', 'roughnessMap', 'bumpMap']) {
+        const textur = material[feld];
+        if (textur && !textur.userData.geteilt) textur.dispose();
+      }
+      material.dispose();
     }
   });
 }
@@ -3356,7 +3410,7 @@ function pushRibbon(positions, punkte, breiten, lift, schuerze) {
 }
 
 function buildRivers(state) {
-  if (riversGroup) scene.remove(riversGroup);
+  disposeGroup(riversGroup);
   riversGroup = new THREE.Group();
   riversGroup.name = 'Flüsse';
   scene.add(riversGroup);
@@ -3569,8 +3623,8 @@ function buildBridge(parent, bridge) {
   parent.add(group);
 }
 
-const BRIDGE_TIMBER = new THREE.MeshStandardMaterial({ color: '#a97c46', roughness: 0.95 });
-const BRIDGE_TIMBER_DARK = new THREE.MeshStandardMaterial({ color: '#6f4d29', roughness: 1 });
+const BRIDGE_TIMBER = geteilt(new THREE.MeshStandardMaterial({ color: '#a97c46', roughness: 0.95 }));
+const BRIDGE_TIMBER_DARK = geteilt(new THREE.MeshStandardMaterial({ color: '#6f4d29', roughness: 1 }));
 
 // Wie fein der Straßenzug unterteilt wird, damit das Band dem Gelände folgt,
 // und wie weit die Kurven an den Knicken ausholen.
@@ -3626,11 +3680,7 @@ function roadPolylines(roads, stufe) {
 }
 
 function buildRoadNetwork(state) {
-  while (roadsGroup.children.length) {
-    const child = roadsGroup.children.pop();
-    child.geometry.dispose();
-    child.material.dispose();
-  }
+  for (const stueck of [...roadsGroup.children]) disposeGroup(stueck);
   const roads = state.roads || {};
   // Drei Bänder: der Karrenweg in Erdfarbe, die Kiesstraße in mattem Grau,
   // die gepflasterte Straße in hellem Basalt.
@@ -3689,7 +3739,7 @@ function buildRoadNetwork(state) {
 // gebaut war: porta praetoria, principalis dextra und sinistra, decumana.
 // Gebaut wird jedes Tor aus zwei Pfosten, einem Sturz darüber und zwei
 // Torflügeln aus dunklem Holz dazwischen.
-const GATE_TIMBER = new THREE.MeshStandardMaterial({ color: '#4a3421', roughness: 1 });
+const GATE_TIMBER = geteilt(new THREE.MeshStandardMaterial({ color: '#4a3421', roughness: 1 }));
 
 // Ein Punkt auf einer Seite der Anlage: `angle` ist die Seite, `t` die Stelle
 // darauf, `half` der halbe Abstand der Seiten von der Mitte.
@@ -3939,7 +3989,7 @@ function buildFortificationParts(kind, scale, options = {}) {
 // Silhouette unterscheiden lassen, nicht erst am Maßstab: Rundhütten mit
 // Strohdach, ein Rechteckbau mit Walmdach, ein Tempel mit Säulen und Giebel.
 
-const CITY_MATERIALS = {
+const CITY_MATERIALS = geteilteSammlung({
   plaster: new THREE.MeshStandardMaterial({ color: '#d8c9a3', roughness: 0.85 }),
   timber: new THREE.MeshStandardMaterial({ color: '#8a6a45', roughness: 1 }),
   thatch: new THREE.MeshStandardMaterial({ color: '#b39456', roughness: 1 }),
@@ -3953,7 +4003,7 @@ const CITY_MATERIALS = {
   // Gestampfter Lehmziegel, wie er am Nil, am Euphrat und in Anatolien
   // gebrannt wurde - heller und rötlicher als der verputzte Stein im Westen.
   mudbrick: new THREE.MeshStandardMaterial({ color: '#c9a06a', roughness: 0.9 }),
-};
+});
 
 // Drei Bauweisen, wie das Spiel die Fraktionen einteilt: die griechisch-
 // römische Welt des Mittelmeers, der Osten von Anatolien bis zum Nil, und der
@@ -4306,14 +4356,9 @@ const SETTLEMENT_RINGS = {
 // Räumt einen Ort ab, wenn er neu gebaut werden muss - sonst hielte jeder
 // gewachsene Ort seine alten Geometrien für den Rest des Feldzugs fest.
 function disposeCityEntry(entry) {
-  scene.remove(entry.group);
-  entry.group.traverse((obj) => {
-    if (obj.geometry) obj.geometry.dispose();
-    if (obj.material) {
-      if (Array.isArray(obj.material)) obj.material.forEach((m) => m.dispose());
-      else obj.material.dispose();
-    }
-  });
+  // Über `disposeGroup`, nicht von Hand: die Häuser eines Orts sind aus
+  // `CITY_MATERIALS` gebaut, und das gehört allen Orten zugleich.
+  disposeGroup(entry.group);
   // Was in dieser Gruppe hing - Namensschild, Fahne -, stand in der Liste der
   // mitgedrehten Tücher. Alles, was nach dem Entfernen nicht mehr an der Szene
   // hängt, fliegt daraus; sonst wüchse die Liste mit jedem gewachsenen Ort.
@@ -4417,7 +4462,7 @@ function buildCityGroup(city) {
 // steht es neben der Stadt statt zwischen ihren Dächern, und beim Kapitol und
 // bei der Akropolis ist der Burgberg ohnehin der historische Ort.
 
-const WONDER_MATERIALS = {
+const WONDER_MATERIALS = geteilteSammlung({
   limestone: new THREE.MeshStandardMaterial({ color: '#ded1ab', roughness: 0.9 }),
   sandstone: new THREE.MeshStandardMaterial({ color: '#cbb083', roughness: 0.95 }),
   marble: new THREE.MeshStandardMaterial({ color: '#f0ead8', roughness: 0.5 }),
@@ -4426,7 +4471,7 @@ const WONDER_MATERIALS = {
   roof: new THREE.MeshStandardMaterial({ color: '#b8503a', roughness: 0.7, side: THREE.DoubleSide }),
   rock: new THREE.MeshStandardMaterial({ color: '#8f8779', roughness: 1, flatShading: true }),
   fire: new THREE.MeshBasicMaterial({ color: '#ffcb6b' }),
-};
+});
 
 function addBox(group, material, width, height, depth, x, y, z, rotation = 0) {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(width, height, depth), material);
@@ -4831,11 +4876,11 @@ function buildMine(scale) {
 // Ackerland neben der Stadt: drei Schläge in zwei Grüntönen, dazwischen die
 // Furchen, und am Rand ein Schuppen. Flach genug, dass die Stadt darüber
 // stehen bleibt, und groß genug, dass man sie von oben sieht.
-const FIELD_MATERIALS = {
+const FIELD_MATERIALS = geteilteSammlung({
   reif: new THREE.MeshStandardMaterial({ color: '#c9a83f', roughness: 1 }),
   gruen: new THREE.MeshStandardMaterial({ color: '#7a9b45', roughness: 1 }),
   furche: new THREE.MeshStandardMaterial({ color: '#8a7440', roughness: 1 }),
-};
+});
 
 function buildFarm(scale) {
   const farm = new THREE.Group();
@@ -4931,12 +4976,12 @@ function addFoundation(group, rand = 0.24) {
 
 // Satteldächer brauchen beide Seiten: die Dachflächen sind einzelne Dreiecke
 // ohne Rückseite, und von der falschen Seite gesehen wäre das Dach nicht da.
-const ROOF_TIMBER = new THREE.MeshStandardMaterial({
+const ROOF_TIMBER = geteilt(new THREE.MeshStandardMaterial({
   color: '#7a5a34', roughness: 0.9, side: THREE.DoubleSide,
-});
-const ROOF_THATCH = new THREE.MeshStandardMaterial({
+}));
+const ROOF_THATCH = geteilt(new THREE.MeshStandardMaterial({
   color: '#b39456', roughness: 1, side: THREE.DoubleSide,
-});
+}));
 
 // Die Kaserne: eine lange Halle mit Satteldach, davor der Exerzierplatz mit
 // Pfahlzaun und zwei Übungspfählen.
@@ -5031,10 +5076,10 @@ function buildGranary(scale) {
 // davor die Gestelle, an denen die Netze trocknen, und ein Boot, das halb aus
 // dem Wasser gezogen ist. Kein Hafen - ein Hafen ist ein Kai für Schiffe, das
 // hier ist ein Strand für Boote.
-const NET_MATERIAL = new THREE.MeshStandardMaterial({
+const NET_MATERIAL = geteilt(new THREE.MeshStandardMaterial({
   color: '#9a8f6d', roughness: 1, transparent: true, opacity: 0.75,
   side: THREE.DoubleSide,
-});
+}));
 
 function buildFishery(scale) {
   const fischerei = new THREE.Group();
@@ -5537,11 +5582,11 @@ function armyScale(count) {
 // Drei Bauarten, wie sie das Spiel unterscheidet: die schwere Quinquereme mit
 // Turm und Enterbrücke, der leichte Ruderer der Ägäis und der Adria, und das
 // hochbordige Segelschiff des Nordens. Was eine Fraktion fährt, sagt data.js.
-const SHIP_TIMBER = new THREE.MeshStandardMaterial({
+const SHIP_TIMBER = geteilt(new THREE.MeshStandardMaterial({
   color: '#6b4423', roughness: 0.85, side: THREE.DoubleSide,
-});
-const SHIP_DECK = new THREE.MeshStandardMaterial({ color: '#8a5c2e', roughness: 0.9 });
-const SHIP_MAST = new THREE.MeshStandardMaterial({ color: '#4a3520' });
+}));
+const SHIP_DECK = geteilt(new THREE.MeshStandardMaterial({ color: '#8a5c2e', roughness: 0.9 }));
+const SHIP_MAST = geteilt(new THREE.MeshStandardMaterial({ color: '#4a3520' }));
 
 function buildShip(color, kind = 'lembos') {
   const ship = new THREE.Group();
@@ -5898,7 +5943,9 @@ let marcherGeometries = null;
 function marcherShapes() {
   if (!marcherGeometries) {
     marcherGeometries = {};
-    for (const rolle of COLUMN_ROLES) marcherGeometries[rolle] = marcherGeometry(rolle);
+    // Einmal gebaut, von jeder Kolonne und jeder Wache im Spiel benutzt: sie
+    // gehören dem Modul, nicht dem Heer, das sie gerade trägt.
+    for (const rolle of COLUMN_ROLES) marcherGeometries[rolle] = geteilt(marcherGeometry(rolle));
   }
   return marcherGeometries;
 }
@@ -6211,7 +6258,10 @@ function syncArmyGroup(state, army, entry) {
 }
 
 function clearHighlights() {
-  for (const mesh of highlightMeshes) scene.remove(mesh);
+  // Die Felder einer Auswahl werden bei jedem Klick neu gebaut. Würden sie nur
+  // aus der Szene genommen, bliebe von jeder Auswahl ein Satz Puffer auf der
+  // Grafikkarte liegen - über einen Feldzug hinweg Tausende.
+  for (const mesh of highlightMeshes) disposeGroup(mesh);
   highlightMeshes.length = 0;
 }
 
@@ -6239,10 +6289,8 @@ let laneGroup = null;
 let laneSignature = '';
 
 function buildTradeLanes(state) {
-  if (laneGroup) {
-    scene.remove(laneGroup);
-    laneGroup = null;
-  }
+  disposeGroup(laneGroup);
+  laneGroup = null;
   laneGroup = new THREE.Group();
   laneGroup.name = 'Handelswege';
   scene.add(laneGroup);
@@ -6512,7 +6560,7 @@ export function syncEntities(state) {
       // wüchse die Liste mit jeder vernichteten Armee weiter.
       const flagIndex = billboards.indexOf(entry.group.userData.flag);
       if (flagIndex !== -1) billboards.splice(flagIndex, 1);
-      scene.remove(entry.group);
+      disposeGroup(entry.group);
       armyGroups.delete(id);
     }
   }
@@ -6584,7 +6632,7 @@ const BORDER_LIFT = 0.24;
 const BORDER_PIECES = 4;
 
 export function buildBorders(state) {
-  if (bordersGroup) scene.remove(bordersGroup);
+  disposeGroup(bordersGroup);
   bordersGroup = new THREE.Group();
   bordersGroup.name = 'Grenzen';
   bordersGroup.visible = bordersVisible;
@@ -7486,15 +7534,10 @@ export function playBattleClash(col, row, onComplete, options = {}) {
       }
     },
     dispose() {
-      group.traverse((child) => {
-        // Die Gestalten der Schlachtreihen teilen sich ihre Geometrie mit
-        // jeder Kolonne und jeder Wache im Spiel (`marcherShapes()`, einmal
-        // gebaut und immer wieder verwendet) - die darf hier nicht mitgehen,
-        // nur ihr eigenes Material.
-        if (child.geometry && !child.userData.sharedGeom) child.geometry.dispose();
-        if (child.material) child.material.dispose();
-      });
-      scene.remove(group);
+      // Die Gestalten der Schlachtreihen teilen sich ihre Geometrie mit jeder
+      // Kolonne und jeder Wache im Spiel (`marcherShapes()`, einmal gebaut und
+      // immer wieder verwendet); `disposeGroup` lässt sie stehen.
+      disposeGroup(group);
       if (activeClash) activeClash = null;
     },
   };

@@ -1,6 +1,6 @@
 // Die Spielversion. Sie steht im Startbildschirm und muss mit der Angabe in
 // package.json übereinstimmen - dieselbe Zahl trägt auch das Desktop-Paket.
-export const GAME_VERSION = '1.66.0';
+export const GAME_VERSION = '1.66.1';
 
 // The grid comes from the geography, not the other way round: change the
 // bounds or the tile size in geodata.js and everything here follows.
